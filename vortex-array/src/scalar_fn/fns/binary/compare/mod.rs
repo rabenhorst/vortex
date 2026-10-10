@@ -47,6 +47,7 @@ mod boolean;
 mod bytes;
 mod decimal;
 mod nested;
+pub(crate) use nested::nested_list_elements_are_constant;
 mod primitive;
 #[cfg(test)]
 mod tests;
