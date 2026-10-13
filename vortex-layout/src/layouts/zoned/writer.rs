@@ -251,6 +251,10 @@ fn default_zoned_aggregate_fns(dtype: &DType, session: &VortexSession) -> Arc<[A
 }
 
 #[cfg(test)]
+#[path = "writer/task_lifetime_tests.rs"]
+mod task_lifetime_tests;
+
+#[cfg(test)]
 mod tests {
     use rstest::rstest;
     use vortex_array::ArrayContext;
