@@ -134,7 +134,8 @@ pub mod message;
 
 use flatbuffers::FlatBufferBuilder;
 use flatbuffers::Follow;
-use flatbuffers::InvalidFlatbuffer;
+/// Re-exported so callers can classify verifier failures without depending on `flatbuffers`.
+pub use flatbuffers::InvalidFlatbuffer;
 use flatbuffers::Verifiable;
 use flatbuffers::VerifierOptions;
 use flatbuffers::WIPOffset;
