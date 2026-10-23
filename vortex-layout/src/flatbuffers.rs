@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright the Vortex contributors
 
-use std::env;
-use std::sync::LazyLock;
-
 use flatbuffers::FlatBufferBuilder;
-use flatbuffers::VerifierOptions;
 use flatbuffers::WIPOffset;
 use flatbuffers::root_with_opts;
 use vortex_array::dtype::DType;
@@ -14,6 +10,7 @@ use vortex_error::vortex_err;
 use vortex_flatbuffers::FlatBuffer;
 use vortex_flatbuffers::FlatBufferRoot;
 use vortex_flatbuffers::WriteFlatBuffer;
+use vortex_flatbuffers::file_metadata_read_verifier_options;
 use vortex_flatbuffers::layout;
 use vortex_session::VortexSession;
 use vortex_session::registry::ReadContext;
@@ -26,23 +23,6 @@ use crate::children::ViewedLayoutChildren;
 use crate::layouts::foreign::new_foreign_layout;
 use crate::segments::SegmentId;
 use crate::session::LayoutSessionExt;
-
-static LAYOUT_VERIFIER: LazyLock<VerifierOptions> = LazyLock::new(|| {
-    VerifierOptions {
-        // Overridden
-        max_tables: env::var("VORTEX_MAX_LAYOUT_TABLES")
-            .ok()
-            .and_then(|lmt| lmt.parse::<usize>().ok())
-            .unwrap_or(1000000),
-        max_depth: env::var("VORTEX_MAX_LAYOUT_DEPTH")
-            .ok()
-            .and_then(|lmt| lmt.parse::<usize>().ok())
-            .unwrap_or(64),
-        // Defaults from flatbuffers
-        max_apparent_size: 1 << 31,
-        ignore_missing_null_terminator: false,
-    }
-});
 
 /// Parse a [`LayoutRef`] from a layout flatbuffer.
 pub fn layout_from_flatbuffer(
@@ -66,7 +46,8 @@ pub fn layout_from_flatbuffer_with_options(
 ) -> VortexResult<LayoutRef> {
     let layout_session = session.layouts();
     let layouts = layout_session.registry();
-    let fb_layout = root_with_opts::<layout::Layout>(&LAYOUT_VERIFIER, &flatbuffer)?;
+    let fb_layout =
+        root_with_opts::<layout::Layout>(file_metadata_read_verifier_options(), &flatbuffer)?;
     let encoding_id = layout_ctx
         .resolve(fb_layout.encoding())
         .ok_or_else(|| vortex_err!("Invalid encoding ID: {}", fb_layout.encoding()))?;

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use flatbuffers::root;
+use flatbuffers::root_with_opts;
 use vortex_array::dtype::DType;
 use vortex_buffer::ByteBuffer;
 use vortex_buffer::ByteBufferMut;
@@ -13,6 +13,7 @@ use vortex_error::vortex_bail;
 use vortex_error::vortex_err;
 use vortex_flatbuffers::FlatBuffer;
 use vortex_flatbuffers::ReadFlatBuffer;
+use vortex_flatbuffers::file_metadata_read_verifier_options;
 use vortex_session::VortexSession;
 
 use crate::EOF_SIZE;
@@ -270,7 +271,10 @@ impl FooterDeserializer {
             );
         }
 
-        Postscript::read_flatbuffer_bytes(&initial_read[eof_loc - ps_size..eof_loc])
+        Postscript::read_flatbuffer_bytes_with_opts(
+            &initial_read[eof_loc - ps_size..eof_loc],
+            file_metadata_read_verifier_options(),
+        )
     }
 
     /// Parse the DType from the initial read.
@@ -285,7 +289,11 @@ impl FooterDeserializer {
             initial_offset,
             segment,
         )?);
-        DType::from_flatbuffer(sliced_buffer, &self.session)
+        DType::from_flatbuffer_with_opts(
+            sliced_buffer,
+            &self.session,
+            file_metadata_read_verifier_options(),
+        )
     }
 
     /// Parse the [`FileStatistics`] from the initial read buffer.
@@ -299,7 +307,10 @@ impl FooterDeserializer {
     ) -> VortexResult<FileStatistics> {
         let sliced_buffer = checked_segment_slice(initial_read, initial_offset, segment)?;
 
-        let fb = root::<vortex_flatbuffers::footer::FileStatistics>(sliced_buffer)?;
+        let fb = root_with_opts::<vortex_flatbuffers::footer::FileStatistics>(
+            file_metadata_read_verifier_options(),
+            sliced_buffer,
+        )?;
         FileStatistics::from_flatbuffer(&fb, dtype, session)
     }
 

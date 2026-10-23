@@ -17,12 +17,14 @@ mod segment;
 use std::sync::Arc;
 
 mod serializer;
+#[cfg(test)]
+mod verifier_tests;
 pub use serializer::*;
 mod deserializer;
 pub use deserializer::*;
 pub use field_sizes::CompressedFieldSizes;
 pub use file_statistics::FileStatistics;
-use flatbuffers::root;
+use flatbuffers::root_with_opts;
 use itertools::Itertools;
 pub use segment::*;
 use vortex_array::ArrayId;
@@ -32,6 +34,7 @@ use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
 use vortex_error::vortex_err;
 use vortex_flatbuffers::FlatBuffer;
+use vortex_flatbuffers::file_metadata_read_verifier_options;
 use vortex_flatbuffers::footer as fb;
 use vortex_layout::LayoutEncodingId;
 use vortex_layout::LayoutRef;
@@ -102,7 +105,8 @@ impl Footer {
             .map(|(key, _segment)| key.len() + size_of::<SegmentSpec>())
             .sum();
         let approx_byte_size = footer_bytes.len() + layout_bytes.len() + metadata_bytes;
-        let fb_footer = root::<fb::Footer>(footer_bytes)?;
+        let fb_footer =
+            root_with_opts::<fb::Footer>(file_metadata_read_verifier_options(), footer_bytes)?;
 
         // Create a LayoutContext from the registry.
         let layout_specs = fb_footer.layout_specs();
