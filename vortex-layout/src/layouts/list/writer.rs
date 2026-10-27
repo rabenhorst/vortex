@@ -27,7 +27,6 @@ use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
 use vortex_error::vortex_bail;
 use vortex_io::kanal_ext::KanalExt;
-use vortex_io::session::RuntimeSessionExt;
 use vortex_session::VortexSession;
 
 use crate::LayoutRef;
@@ -160,8 +159,7 @@ impl LayoutStrategy for ListLayoutStrategy {
             validity_tx,
         );
 
-        // Spawn a writer per child sub-stream, concurrently.
-        let handle = session.handle();
+        // A writer per child sub-stream, joined on this task.
         let mut child_specs: Vec<(
             DType,
             Arc<dyn LayoutStrategy>,
@@ -186,12 +184,11 @@ impl LayoutStrategy for ListLayoutStrategy {
                 let child_eof = eof.split_off();
                 let ctx = ctx.clone();
                 let segment_sink = Arc::clone(&segment_sink);
-                let session = session.clone();
-                handle.spawn_nested(move |_| async move {
+                async move {
                     strategy
-                        .write_stream(ctx, segment_sink, child_stream, child_eof, &session)
+                        .write_stream(ctx, segment_sink, child_stream, child_eof, session)
                         .await
-                })
+                }
             })
             .collect();
 
@@ -332,6 +329,7 @@ mod tests {
     use vortex_array::validity::Validity;
     use vortex_buffer::buffer;
     use vortex_io::session::RuntimeSession;
+    use vortex_io::session::RuntimeSessionExt;
 
     use super::*;
     use crate::layouts::chunked::writer::ChunkedLayoutStrategy;
@@ -477,9 +475,9 @@ mod tests {
         insta::assert_snapshot!(layout.display_tree(), @"
         vortex.list, dtype: list({a=i32, b=i32}), children: 2
         ├── elements: vortex.struct, dtype: {a=i32, b=i32}, children: 2
-        │   ├── a: vortex.flat, dtype: i32, segment: 1
-        │   └── b: vortex.flat, dtype: i32, segment: 2
-        └── offsets: vortex.flat, dtype: u64, segment: 0
+        │   ├── a: vortex.flat, dtype: i32, segment: 0
+        │   └── b: vortex.flat, dtype: i32, segment: 1
+        └── offsets: vortex.flat, dtype: u64, segment: 2
         ");
         Ok(())
     }
@@ -505,9 +503,9 @@ mod tests {
         insta::assert_snapshot!(layout.display_tree(), @"
         vortex.list, dtype: list(list(i32)), children: 2
         ├── elements: vortex.list, dtype: list(i32), children: 2
-        │   ├── elements: vortex.flat, dtype: i32, segment: 1
-        │   └── offsets: vortex.flat, dtype: u64, segment: 2
-        └── offsets: vortex.flat, dtype: u64, segment: 0
+        │   ├── elements: vortex.flat, dtype: i32, segment: 0
+        │   └── offsets: vortex.flat, dtype: u64, segment: 1
+        └── offsets: vortex.flat, dtype: u64, segment: 2
         ");
         Ok(())
     }
@@ -538,10 +536,10 @@ mod tests {
         vortex.list, dtype: list(list(list(i32))), children: 2
         ├── elements: vortex.list, dtype: list(list(i32)), children: 2
         │   ├── elements: vortex.list, dtype: list(i32), children: 2
-        │   │   ├── elements: vortex.flat, dtype: i32, segment: 2
-        │   │   └── offsets: vortex.flat, dtype: u64, segment: 3
-        │   └── offsets: vortex.flat, dtype: u64, segment: 1
-        └── offsets: vortex.flat, dtype: u64, segment: 0
+        │   │   ├── elements: vortex.flat, dtype: i32, segment: 0
+        │   │   └── offsets: vortex.flat, dtype: u64, segment: 1
+        │   └── offsets: vortex.flat, dtype: u64, segment: 2
+        └── offsets: vortex.flat, dtype: u64, segment: 3
         ");
         Ok(())
     }

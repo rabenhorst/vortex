@@ -8,6 +8,8 @@ use flatbuffers::Verifiable;
 use flatbuffers::VerifierOptions;
 use flatbuffers::root_with_opts;
 use vortex_buffer::ByteBuffer;
+use vortex_buffer::segment::Piece;
+use vortex_buffer::segment::Segment;
 use vortex_error::VortexError;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
@@ -106,14 +108,29 @@ impl FooterSerializer {
     /// Serialize the footer into a byte buffer that can later be deserialized as a [`Footer`].
     /// This can be helpful for storing some footer data out-of-band to accelerate opening a file.
     pub fn serialize(self) -> VortexResult<Vec<ByteBuffer>> {
-        self.serialize_with_metadata()
-            .map(|(buffers, _metadata, _approx_byte_size)| buffers)
+        let (segment, _metadata, _approx_byte_size) = self.serialize_with_metadata()?;
+        let mut data = segment.buffers().iter();
+        Ok(segment
+            .piece_list()
+            .iter()
+            .map(|piece| match *piece {
+                Piece::Zeros(len) => ByteBuffer::zeroed(len as usize),
+                Piece::Buffer => data
+                    .next()
+                    .vortex_expect("a buffer piece has a buffer")
+                    .clone(),
+                Piece::Framing { start, end } => {
+                    ByteBuffer::copy_from(&segment.framing()[start as usize..end as usize])
+                }
+            })
+            .collect())
     }
 
+    /// Serialize the footer as one segment, starting at the configured offset.
     pub(crate) fn serialize_with_metadata(
         mut self,
-    ) -> VortexResult<(Vec<ByteBuffer>, super::MetadataSegments, usize)> {
-        let mut buffers = vec![];
+    ) -> VortexResult<(Segment, super::MetadataSegments, usize)> {
+        let mut buffers = Segment::new();
 
         let (metadata_segments, metadata_locators) = if self.metadata.is_empty() {
             let locators = self
@@ -137,21 +154,20 @@ impl FooterSerializer {
             let mut segments = Vec::with_capacity(metadata.len());
             let mut locators = Vec::with_capacity(metadata.len());
             for (key, metadata) in metadata {
-                let (metadata_buffers, segment) = write_buffer(&mut self.offset, metadata)?;
-                buffers.extend(metadata_buffers);
+                let segment = write_buffer(&mut self.offset, &mut buffers, metadata)?;
                 locators.push((key.clone(), SegmentSpec::from(&segment)));
                 segments.push(PostscriptMetadata { key, segment });
             }
             (segments, locators)
         };
-        let metadata_storage_bytes = buffers.iter().map(ByteBuffer::len).sum::<usize>();
+        let metadata_storage_bytes = buffers.len();
 
         let dtype_segment = if self.exclude_dtype {
             None
         } else {
             let (buffer, dtype_segment) = write_flatbuffer(&mut self.offset, self.footer.dtype())?;
             verify_readable::<fbd::DType>(&self.verifier_options, "dtype", &buffer)?;
-            buffers.push(buffer);
+            buffers.push_buffer(buffer);
             Some(dtype_segment)
         };
 
@@ -164,7 +180,7 @@ impl FooterSerializer {
             &self.footer.layout().flatbuffer_writer(&layout_ctx),
         )?;
         verify_readable::<fbl::Layout>(&self.verifier_options, "layout", &buffer)?;
-        buffers.push(buffer);
+        buffers.push_buffer(buffer);
 
         let statistics_segment = match self.footer.statistics() {
             None => None,
@@ -176,7 +192,7 @@ impl FooterSerializer {
                     "file statistics",
                     &buffer,
                 )?;
-                buffers.push(buffer);
+                buffers.push_buffer(buffer);
                 Some(stats_segment)
             }
         };
@@ -190,7 +206,7 @@ impl FooterSerializer {
             },
         )?;
         verify_readable::<fb::Footer>(&self.verifier_options, "footer", &buffer)?;
-        buffers.push(buffer);
+        buffers.push_buffer(buffer);
 
         // Assemble the postscript, and write it manually to avoid any framing.
         let postscript = Postscript {
@@ -216,17 +232,17 @@ impl FooterSerializer {
 
         let postscript_len = u16::try_from(postscript_buffer.len())
             .vortex_expect("Postscript already verified to fit into u16");
-        buffers.push(postscript_buffer.into_inner());
+        buffers.push_buffer(postscript_buffer.into_inner());
 
         // And finally, the EOF 8-byte footer.
         let mut eof = [0u8; EOF_SIZE];
         eof[0..2].copy_from_slice(&VERSION.to_le_bytes());
         eof[2..4].copy_from_slice(&postscript_len.to_le_bytes());
         eof[4..8].copy_from_slice(&MAGIC_BYTES);
-        buffers.push(ByteBuffer::copy_from(eof));
+        buffers.push_framing_bytes(&eof);
 
-        let approx_byte_size =
-            buffers.iter().map(ByteBuffer::len).sum::<usize>() - metadata_storage_bytes;
+        let approx_byte_size = usize::try_from(buffers.len() - metadata_storage_bytes)
+            .vortex_expect("the footer fits in memory");
         Ok((buffers, metadata_locators.into(), approx_byte_size))
     }
 }
@@ -298,8 +314,9 @@ fn write_flatbuffer<F: FlatBufferRoot + WriteFlatBuffer>(
 
 fn write_buffer(
     offset: &mut u64,
+    out: &mut Segment,
     buffer: ByteBuffer,
-) -> VortexResult<(Vec<ByteBuffer>, PostscriptSegment)> {
+) -> VortexResult<PostscriptSegment> {
     let length = u32::try_from(buffer.len())
         .map_err(|_| vortex_err!("metadata segment length exceeds maximum u32"))?;
     let alignment = buffer.alignment();
@@ -315,11 +332,10 @@ fn write_buffer(
 
     *offset += padding + u64::from(length);
 
-    let mut buffers = Vec::with_capacity(if padding == 0 { 1 } else { 2 });
-    if padding > 0 {
-        buffers.push(ByteBuffer::zeroed(padding as usize));
-    }
-    buffers.push(buffer);
+    out.push_zeros(
+        u32::try_from(padding).map_err(|_| vortex_err!("metadata padding exceeds maximum u32"))?,
+    );
+    out.push_buffer(buffer);
 
-    Ok((buffers, segment))
+    Ok(segment)
 }
