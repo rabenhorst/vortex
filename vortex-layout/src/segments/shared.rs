@@ -69,11 +69,18 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     use vortex_buffer::ByteBuffer;
+    use vortex_buffer::segment::Segment;
 
     use super::*;
     use crate::segments::SegmentSink;
     use crate::segments::TestSegments;
     use crate::sequence::SequenceId;
+
+    fn segment_of(data: &ByteBuffer) -> Segment {
+        let mut segment = Segment::new();
+        segment.push_buffer(data.clone());
+        segment
+    }
 
     // Custom source that tracks how many times a segment is requested
     #[derive(Default, Clone)]
@@ -98,7 +105,7 @@ mod tests {
         let seq_id = SequenceId::root().downgrade();
         source
             .segments
-            .write(seq_id, vec![data.clone()])
+            .write(seq_id, segment_of(&data))
             .await
             .unwrap();
 
@@ -127,7 +134,7 @@ mod tests {
         let seq_id = SequenceId::root().downgrade();
         source
             .segments
-            .write(seq_id, vec![data.clone()])
+            .write(seq_id, segment_of(&data))
             .await
             .unwrap();
 

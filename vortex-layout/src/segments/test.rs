@@ -9,6 +9,7 @@ use parking_lot::Mutex;
 use vortex_array::buffer::BufferHandle;
 use vortex_buffer::ByteBuffer;
 use vortex_buffer::ByteBufferMut;
+use vortex_buffer::segment::Segment;
 use vortex_error::VortexExpect;
 use vortex_error::VortexResult;
 use vortex_error::vortex_err;
@@ -39,15 +40,11 @@ impl SegmentSource for TestSegments {
 
 #[async_trait]
 impl SegmentSink for TestSegments {
-    async fn write(
-        &self,
-        _sequence_id: SequenceId,
-        buffers: Vec<ByteBuffer>,
-    ) -> VortexResult<SegmentId> {
-        // Combine all the buffers since we're only a test implementation
+    async fn write(&self, _sequence_id: SequenceId, segment: Segment) -> VortexResult<SegmentId> {
+        // Combine all the pieces since we're only a test implementation
         let mut buffer = ByteBufferMut::empty();
-        for segment in buffers {
-            buffer.extend_from_slice(segment.as_ref());
+        for bytes in segment.body_pieces() {
+            buffer.extend_from_slice(bytes);
         }
 
         let mut segments = self.segments.lock();
