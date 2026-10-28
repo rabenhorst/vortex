@@ -204,8 +204,15 @@ impl<A: 'static + Send> RepeatedScan<A> {
         let concurrency = self.concurrency * num_workers;
         let handle = self.session.handle();
 
-        let stream =
-            futures::stream::iter(self.execute(row_range)?).map(move |task| handle.spawn(task));
+        // Inline, the stream polls each split in place of a spawned task.
+        let inline = handle.run_inline();
+        let stream = futures::stream::iter(self.execute(row_range)?).map(move |task| {
+            if inline {
+                futures::future::Either::Left(task)
+            } else {
+                futures::future::Either::Right(handle.spawn(task))
+            }
+        });
 
         let stream = if self.ordered {
             stream.buffered(concurrency).boxed()

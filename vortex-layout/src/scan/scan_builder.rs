@@ -11,6 +11,7 @@ use std::task::ready;
 use futures::Stream;
 use futures::StreamExt;
 use futures::future::BoxFuture;
+use futures::future::Either;
 use futures::stream::BoxStream;
 use itertools::Itertools;
 use vortex_array::ArrayRef;
@@ -447,8 +448,15 @@ impl<A: 'static + Send> Stream for LazyScanStream<A> {
                             let ordered = preparing.ordered;
                             let concurrency = preparing.concurrency;
                             let handle = preparing.handle.clone();
-                            let stream =
-                                futures::stream::iter(tasks).map(move |task| handle.spawn(task));
+                            // Inline, the stream polls each split in place of a spawned task.
+                            let inline = handle.run_inline();
+                            let stream = futures::stream::iter(tasks).map(move |task| {
+                                if inline {
+                                    Either::Left(task)
+                                } else {
+                                    Either::Right(handle.spawn(task))
+                                }
+                            });
                             let stream = if ordered {
                                 stream.buffered(concurrency).boxed()
                             } else {
